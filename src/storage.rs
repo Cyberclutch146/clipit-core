@@ -98,4 +98,79 @@ impl StorageEngine {
     pub fn get_connection(&self) -> Result<r2d2::PooledConnection<SqliteConnectionManager>, String> {
         self.pool.get().map_err(|e| e.to_string())
     }
+
+    pub fn insert_item(&self, content_type: &str, text_content: Option<&str>, source_app: Option<&str>) -> Result<i64, String> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "INSERT INTO clipboard_items (content_type, text_content, source_app) VALUES (?1, ?2, ?3)",
+            rusqlite::params![content_type, text_content, source_app],
+        ).map_err(|e| e.to_string())?;
+        
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn get_items(&self, limit: u32, offset: u32) -> Result<Vec<clipit_types::ClipboardItem>, String> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, content_type, text_content, source_app, source_title, created_at, pinned 
+             FROM clipboard_items 
+             ORDER BY created_at DESC 
+             LIMIT ?1 OFFSET ?2"
+        ).map_err(|e| e.to_string())?;
+
+        let iter = stmt.query_map(rusqlite::params![limit, offset], |row| {
+            Ok(clipit_types::ClipboardItem {
+                id: row.get(0)?,
+                content_type: row.get(1)?,
+                text_content: row.get(2)?,
+                source_app: row.get(3)?,
+                source_title: row.get(4)?,
+                created_at: row.get(5)?,
+                pinned: row.get(6)?,
+            })
+        }).map_err(|e| e.to_string())?;
+
+        let mut items = Vec::new();
+        for item in iter {
+            if let Ok(i) = item {
+                items.push(i);
+            }
+        }
+        Ok(items)
+    }
+
+    pub fn search_items(&self, query: &str, limit: u32, offset: u32) -> Result<Vec<clipit_types::ClipboardItem>, String> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT i.id, i.content_type, i.text_content, i.source_app, i.source_title, i.created_at, i.pinned 
+             FROM clipboard_fts f
+             JOIN clipboard_items i ON f.rowid = i.id
+             WHERE clipboard_fts MATCH ?1
+             ORDER BY i.created_at DESC 
+             LIMIT ?2 OFFSET ?3"
+        ).map_err(|e| e.to_string())?;
+
+        // FTS5 syntax requires formatting, simple prefix match for MVP
+        let fts_query = format!("*{}*", query);
+
+        let iter = stmt.query_map(rusqlite::params![fts_query, limit, offset], |row| {
+            Ok(clipit_types::ClipboardItem {
+                id: row.get(0)?,
+                content_type: row.get(1)?,
+                text_content: row.get(2)?,
+                source_app: row.get(3)?,
+                source_title: row.get(4)?,
+                created_at: row.get(5)?,
+                pinned: row.get(6)?,
+            })
+        }).map_err(|e| e.to_string())?;
+
+        let mut items = Vec::new();
+        for item in iter {
+            if let Ok(i) = item {
+                items.push(i);
+            }
+        }
+        Ok(items)
+    }
 }
