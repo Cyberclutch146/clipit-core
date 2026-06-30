@@ -114,7 +114,7 @@ impl StorageEngine {
         let mut stmt = conn.prepare(
             "SELECT id, content_type, text_content, source_app, source_title, created_at, pinned 
              FROM clipboard_items 
-             ORDER BY created_at DESC 
+             ORDER BY pinned DESC, created_at DESC 
              LIMIT ?1 OFFSET ?2"
         ).map_err(|e| e.to_string())?;
 
@@ -139,6 +139,32 @@ impl StorageEngine {
         Ok(items)
     }
 
+    pub fn get_item(&self, id: i64) -> Result<clipit_types::ClipboardItem, String> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, content_type, text_content, source_app, source_title, created_at, pinned 
+             FROM clipboard_items WHERE id = ?1"
+        ).map_err(|e| e.to_string())?;
+
+        let mut iter = stmt.query_map(rusqlite::params![id], |row| {
+            Ok(clipit_types::ClipboardItem {
+                id: row.get(0)?,
+                content_type: row.get(1)?,
+                text_content: row.get(2)?,
+                source_app: row.get(3)?,
+                source_title: row.get(4)?,
+                created_at: row.get(5)?,
+                pinned: row.get(6)?,
+            })
+        }).map_err(|e| e.to_string())?;
+
+        if let Some(item_res) = iter.next() {
+            item_res.map_err(|e| e.to_string())
+        } else {
+            Err("Item not found".into())
+        }
+    }
+
     pub fn search_items(&self, query: &str, limit: u32, offset: u32) -> Result<Vec<clipit_types::ClipboardItem>, String> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
@@ -146,7 +172,7 @@ impl StorageEngine {
              FROM clipboard_fts f
              JOIN clipboard_items i ON f.rowid = i.id
              WHERE clipboard_fts MATCH ?1
-             ORDER BY i.created_at DESC 
+             ORDER BY i.pinned DESC, i.created_at DESC 
              LIMIT ?2 OFFSET ?3"
         ).map_err(|e| e.to_string())?;
 
@@ -172,5 +198,32 @@ impl StorageEngine {
             }
         }
         Ok(items)
+    }
+
+    pub fn toggle_pin(&self, id: i64) -> Result<(), String> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE clipboard_items SET pinned = NOT pinned WHERE id = ?1",
+            rusqlite::params![id],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn delete_item(&self, id: i64) -> Result<(), String> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "DELETE FROM clipboard_items WHERE id = ?1",
+            rusqlite::params![id],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn clear_unpinned_history(&self) -> Result<(), String> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "DELETE FROM clipboard_items WHERE pinned = 0",
+            [],
+        ).map_err(|e| e.to_string())?;
+        Ok(())
     }
 }
