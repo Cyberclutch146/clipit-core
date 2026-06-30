@@ -150,8 +150,8 @@ impl StorageEngine {
              LIMIT ?2 OFFSET ?3"
         ).map_err(|e| e.to_string())?;
 
-        // FTS5 syntax requires formatting, simple prefix match for MVP
-        let fts_query = format!("*{}*", query);
+        // FTS5 syntax requires formatting, prefix match requires quote wrapper
+        let fts_query = format!("\"{}\"*", query);
 
         let iter = stmt.query_map(rusqlite::params![fts_query, limit, offset], |row| {
             Ok(clipit_types::ClipboardItem {
